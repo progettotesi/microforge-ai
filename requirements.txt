@@ -1,0 +1,8 @@
+streamlit
+pandas
+scikit-learn
+matplotlib
+openai
+tqdm
+pyyaml
+git+https://github.com/codelion/openevolve.git
