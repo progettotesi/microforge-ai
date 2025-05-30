@@ -1,27 +1,13 @@
-import asyncio
 from openevolve import OpenEvolve
+import asyncio
 import os
-from streamlit import secrets
 
 async def run_open_evolve():
-    os.environ["OPENAI_API_KEY"] = secrets["OPENAI_API_KEY"]
-
+    os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")  # O lo setti altrove
     evolve = OpenEvolve(
-        initial_program_path="evaluator.py",
+        initial_program_path="model.py",
         evaluation_file="evaluator.py",
-        llm_config={"api_key": secrets["OPENAI_API_KEY"]},  # ✅ niente config.yaml
-        evolution_config={
-            "iterations": 5,
-            "population_size": 3,
-            "temperature": 0.7,
-            "top_k": 1,
-            "mutate_top_k": 2,
-            "crossover_top_k": 1
-        },
-        evaluation_config={
-            "maximize": "auc"
-        }
+        config_path="config.yaml"
     )
-
-    best = await evolve.run()
+    best = await evolve.run(iterations=5)
     return best.metrics
