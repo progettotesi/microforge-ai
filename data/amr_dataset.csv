@@ -1,0 +1,7 @@
+isolate_id,bacteria,antibiotic,mic,resistant
+001,P.aeruginosa,Cefepime,16,1
+002,P.aeruginosa,Cefepime,2,0
+003,P.aeruginosa,Ciprofloxacin,0.5,0
+004,P.aeruginosa,Ciprofloxacin,8,1
+005,P.aeruginosa,Meropenem,0.25,0
+006,P.aeruginosa,Meropenem,32,1
