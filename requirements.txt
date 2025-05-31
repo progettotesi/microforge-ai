@@ -6,3 +6,4 @@ openai
 tqdm
 pyyaml
 git+https://github.com/codelion/openevolve.git
+plotly
