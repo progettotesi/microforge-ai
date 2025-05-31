@@ -1,0 +1,850 @@
+===== model.py =====
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+
+# EVOLVE-BLOCK-START
+def train_model(df):
+    df["resistant"] = df["resistant"].astype(int)
+    X = df[["mic"]]
+    y = df["resistant"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.3, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+    model.fit(X_train, y_train)
+    return model, X_test, y_test
+# EVOLVE-BLOCK-END
+
+===== evolve_model.py =====
+from openevolve import OpenEvolve
+import asyncio
+import os
+
+async def run_open_evolve():
+    os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")  # O lo setti altrove
+    evolve = OpenEvolve(
+        initial_program_path="model.py",
+        evaluation_file="evaluator.py",
+        config_path="config.yaml"
+    )
+    try:
+        best = await evolve.run(iterations=5)
+        print("Best program metrics:", best.metrics)
+        if not best.metrics:
+            print("No metrics returned from evaluation.")
+        return best.metrics
+    except Exception as e:
+        print("OpenEvolve error:", e)
+        raise
+
+===== evaluator.py =====
+from model import train_model
+from sklearn.metrics import roc_auc_score
+import pandas as pd
+
+def evaluate(_):
+    df = pd.read_csv("data/amr_dataset.csv")
+    model, X_test, y_test = train_model(df)
+    y_pred = model.predict_proba(X_test)[:, 1]
+    auc = roc_auc_score(y_test, y_pred)
+    return {"auc": auc}
+
+===== config.yaml =====
+max_iterations: 5
+
+llm:
+  primary_model: "gpt-4"
+  temperature: 0.7
+
+database:
+  population_size: 3
+  num_islands: 1
+
+evaluation:
+  maximize: auc
+
+===== requirements.txt =====
+streamlit
+pandas
+scikit-learn
+matplotlib
+openai
+tqdm
+pyyaml
+git+https://github.com/codelion/openevolve.git
+
+===== data_processor.py =====
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+
+class DataProcessor:
+    def __init__(self):
+        self.scaler = StandardScaler()
+        self.feature_cols = []
+    
+    def process_data(self, df):
+        """
+        Processa i dati grezzi e crea features avanzate
+        """
+        # Copia per non modificare l'originale
+        processed_df = df.copy()
+        
+        # Features avanzate
+        # 1. Log-transform delle MIC (importante per valori distribuiti esponenzialmente)
+        processed_df['log_mic'] = np.log1p(processed_df['mic'])
+        
+        # 2. Features specifiche degli antibiotici
+        processed_df = pd.concat([
+            processed_df, 
+            pd.get_dummies(processed_df['antibiotic'], prefix='abx')
+        ], axis=1)
+        
+        # 3. Features specifiche dei batteri
+        processed_df = pd.concat([
+            processed_df, 
+            pd.get_dummies(processed_df['bacteria'], prefix='bac')
+        ], axis=1)
+        
+        # 4. Interazione MIC - antibiotico
+        for abx in df['antibiotic'].unique():
+            col_name = f'mic_x_{abx}'
+            mask = processed_df['antibiotic'] == abx
+            processed_df[col_name] = 0
+            processed_df.loc[mask, col_name] = processed_df.loc[mask, 'mic']
+        
+        # Rimuovi colonne non necessarie per il modello SOLO SE non serve per evoluzione
+        # (lascia 'isolate_id' se presente, sarà usata da ResistanceEvolutionModel)
+        # drop_cols = ['isolate_id']
+        # processed_df = processed_df.drop(drop_cols, axis=1, errors='ignore')
+        
+        # Salva colonne features per futuri riferimenti
+        self.feature_cols = [c for c in processed_df.columns 
+                           if c not in ['resistant', 'bacteria', 'antibiotic']]
+        
+        return processed_df
+    
+    def scale_features(self, X):
+        """
+        Normalizza le features numeriche
+        """
+        numeric_cols = X.select_dtypes(include=['float', 'int']).columns
+        X_scaled = X.copy()
+        X_scaled[numeric_cols] = self.scaler.fit_transform(X[numeric_cols])
+        return X_scaled
+    
+    def get_feature_matrix(self, df):
+        """
+        Estrae la matrice di features per il modello
+        """
+        processed = self.process_data(df)
+        X = processed[self.feature_cols]
+        if 'resistant' in processed.columns:
+            y = processed['resistant'].astype(int)
+            return X, y
+        else:
+            return X
+
+===== amr_predictor.py =====
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import roc_auc_score, classification_report
+import joblib
+from data_processor import DataProcessor
+
+class AMRPredictor:
+    def __init__(self, model_type='rf', advanced_features=True):
+        self.model_type = model_type
+        self.advanced_features = advanced_features
+        self.processor = DataProcessor()
+        
+        # Scegli modello di base
+        if model_type == 'rf':
+            self.model = RandomForestClassifier(
+                n_estimators=100,
+                max_depth=10,
+                min_samples_leaf=4,
+                class_weight='balanced',
+                random_state=42
+            )
+        elif model_type == 'gb':
+            self.model = GradientBoostingClassifier(
+                n_estimators=100,
+                learning_rate=0.1,
+                max_depth=5,
+                random_state=42
+            )
+        else:
+            raise ValueError(f"Tipo modello {model_type} non supportato")
+        
+    def train(self, df):
+        """Allena il modello sui dati forniti"""
+        # Pre-processing
+        if self.advanced_features:
+            X, y = self.processor.get_feature_matrix(df)
+        else:
+            X = df[['mic']]
+            y = df['resistant'].astype(int)
+        
+        # Split train-test
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, stratify=y, test_size=0.3, random_state=42
+        )
+        
+        # Training
+        self.model.fit(X_train, y_train)
+        
+        # Valutazione
+        train_auc = roc_auc_score(y_train, self.model.predict_proba(X_train)[:, 1])
+        test_auc = roc_auc_score(y_test, self.model.predict_proba(X_test)[:, 1])
+        
+        results = {
+            'model': self.model,
+            'train_auc': train_auc,
+            'test_auc': test_auc,
+            'X_test': X_test,
+            'y_test': y_test
+        }
+        
+        return results
+    
+    def predict(self, df):
+        """Predizione su nuovi dati"""
+        if self.advanced_features:
+            X = self.processor.get_feature_matrix(df)
+            if isinstance(X, tuple):
+                X = X[0]  # Ignora y se restituito
+        else:
+            X = df[['mic']]
+        
+        # Probabilità di resistenza
+        probs = self.model.predict_proba(X)[:, 1]
+        
+        # Classe predetta
+        preds = self.model.predict(X)
+        
+        # Risultati con ID
+        results = pd.DataFrame({
+            'isolate_id': df['isolate_id'] if 'isolate_id' in df.columns else range(len(X)),
+            'bacteria': df['bacteria'],
+            'antibiotic': df['antibiotic'],
+            'mic': df['mic'],
+            'resistance_probability': probs,
+            'predicted_resistant': preds
+        })
+        
+        return results
+    
+    def feature_importance(self):
+        """Restituisce l'importanza delle features"""
+        if not hasattr(self, 'model') or not hasattr(self.processor, 'feature_cols'):
+            raise ValueError("Model must be trained first")
+        
+        importances = pd.DataFrame({
+            'feature': self.processor.feature_cols,
+            'importance': self.model.feature_importances_
+        })
+        
+        return importances.sort_values('importance', ascending=False)
+    
+    def save_model(self, filepath):
+        """Salva modello su disco"""
+        joblib.dump(self, filepath)
+    
+    @classmethod
+    def load_model(cls, filepath):
+        """Carica modello da disco"""
+        return joblib.load(filepath)
+
+===== resistance_evolution.py =====
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+import joblib
+import matplotlib.pyplot as plt
+from data_processor import DataProcessor
+
+class ResistanceEvolutionModel:
+    def __init__(self, time_horizon=6, model_type='rf'):
+        """
+        Modello per prevedere l'evoluzione della resistenza nel tempo
+        
+        Args:
+            time_horizon: Orizzonte di predizione in mesi
+            model_type: 'rf' (RandomForest) o 'gb' (GradientBoosting)
+        """
+        self.time_horizon = time_horizon
+        self.processor = DataProcessor()
+        
+        # Modello per predirre l'incremento MIC nel tempo
+        if model_type == 'rf':
+            self.evolution_model = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=6,
+                random_state=42
+            )
+        elif model_type == 'gb':
+            self.evolution_model = GradientBoostingRegressor(
+                n_estimators=100,
+                learning_rate=0.1,
+                max_depth=5,
+                random_state=42
+            )
+        else:
+            raise ValueError(f"Tipo modello {model_type} non supportato per evoluzione")
+        
+        # Soglie MIC per antibiotici comuni
+        self.resistance_breakpoints = {
+            'Cefepime': 8,      # mcg/mL
+            'Ciprofloxacin': 1,  # mcg/mL
+            'Meropenem': 4      # mcg/mL
+        }
+    
+    def train(self, longitudinal_df):
+        """
+        Allena il modello su dati longitudinali
+        
+        Args:
+            longitudinal_df: DataFrame con colonne isolate_id, bacteria, antibiotic, 
+                            mic, time_point (mesi)
+        """
+        # Preprocessing
+        X = self.processor.process_data(longitudinal_df)
+        
+        # Preparazione target: Incremento MIC al tempo t+1
+        X['next_mic'] = X.groupby(['isolate_id', 'antibiotic'])['mic'].shift(-1)
+        X['mic_change'] = X['next_mic'] - X['mic']
+        
+        # Rimuovi righe senza punto successivo
+        X = X.dropna(subset=['next_mic', 'mic_change'])
+        
+        # Prepara features e target
+        features = [c for c in X.columns if c not in 
+                   ['resistant', 'isolate_id', 'mic_change', 'next_mic']]
+        
+        X_train = X[features]
+        y_train = X['mic_change']
+
+        # Usa solo colonne numeriche per il modello
+        X_train = X_train.select_dtypes(include=[np.number])
+        # Salva le colonne numeriche usate per il fit
+        self.feature_names_ = X_train.columns.tolist()
+        
+        # Controllo dati sufficienti
+        if len(X_train) == 0 or len(y_train) == 0:
+            raise ValueError("Dati insufficienti per l'addestramento del modello di evoluzione. Servono dati longitudinali con almeno due time point per ogni isolate_id e antibiotic.")
+        
+        # Allena modello
+        self.evolution_model.fit(X_train, y_train)
+        
+        # Valutazione
+        pred_changes = self.evolution_model.predict(X_train)
+        mse = np.mean((y_train - pred_changes)**2)
+        
+        return {'mse': mse, 'model': self.evolution_model}
+    
+    def predict_evolution(self, df, months_ahead=6):
+        """
+        Predice l'evoluzione della MIC nei mesi successivi
+        
+        Args:
+            df: DataFrame con dati attuali
+            months_ahead: Numero mesi da predire
+        
+        Returns:
+            DataFrame con predizioni MIC e resistenza
+        """
+        results = []
+        
+        # Per ogni isolato
+        for _, row in df.iterrows():
+            isolate_id = row['isolate_id'] if 'isolate_id' in df.columns else 'unknown'
+            bac = row['bacteria']
+            abx = row['antibiotic']
+            current_mic = row['mic']
+            
+            # Simulazione evoluzione
+            mic_values = [current_mic]
+            current_data = pd.DataFrame({
+                'isolate_id': [isolate_id],
+                'bacteria': [bac],
+                'antibiotic': [abx],
+                'mic': [current_mic]
+            })
+            
+            # Progressivamente predici cambiamenti MIC
+            for month in range(1, months_ahead + 1):
+                # Processo dato corrente
+                X = self.processor.process_data(current_data)
+                feature_cols = [c for c in X.columns if c not in ['resistant', 'isolate_id']]
+                # Usa solo le colonne numeriche viste nel fit
+                # Usa solo le colonne numeriche viste nel fit, aggiungendo colonne mancanti con 0
+                if hasattr(self, "feature_names_"):
+                    for col in self.feature_names_:
+                        if col not in X.columns:
+                            X[col] = 0
+                    X_pred = X[self.feature_names_]
+                else:
+                    X_pred = X.select_dtypes(include=[np.number])
+                # Predici cambiamento MIC
+                mic_change = self.evolution_model.predict(X_pred)[0]
+                new_mic = max(0.001, current_mic + mic_change)  # Minimo MIC
+                
+                # Ottieni breakpoint per antibiotico o default
+                if abx in self.resistance_breakpoints:
+                    breakpoint = self.resistance_breakpoints[abx]
+                else:
+                    breakpoint = 4  # Valore di default
+                
+                # Determina se è resistente
+                resistant = 1 if new_mic >= breakpoint else 0
+                
+                # Salva risultato
+                results.append({
+                    'isolate_id': isolate_id,
+                    'bacteria': bac,
+                    'antibiotic': abx,
+                    'month': month,
+                    'predicted_mic': new_mic,
+                    'predicted_resistant': resistant,
+                    'resistance_probability': 1 if new_mic >= breakpoint * 1.5 else 
+                                             (0 if new_mic < breakpoint * 0.5 else 
+                                              (new_mic - breakpoint * 0.5) / breakpoint)
+                })
+                
+                # Aggiorna MIC corrente per prossima iterazione
+                current_mic = new_mic
+                current_data = pd.DataFrame({
+                    'isolate_id': [isolate_id],
+                    'bacteria': [bac],
+                    'antibiotic': [abx],
+                    'mic': [current_mic]
+                })
+        
+        return pd.DataFrame(results)
+    
+    def plot_resistance_evolution(self, evolution_df):
+        """
+        Crea grafici per l'evoluzione della resistenza
+        
+        Args:
+            evolution_df: DataFrame risultante da predict_evolution
+        """
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Per ogni combinazione batterio-antibiotico
+        for (bac, abx), group in evolution_df.groupby(['bacteria', 'antibiotic']):
+            group = group.sort_values('month')
+            ax.plot(group['month'], group['predicted_mic'], 
+                    marker='o', label=f"{bac} - {abx}")
+            
+            # Aggiungi linea soglia
+            if abx in self.resistance_breakpoints:
+                breakpoint = self.resistance_breakpoints[abx]
+                ax.axhline(y=breakpoint, color='r', linestyle='--', alpha=0.5)
+            
+        ax.set_title("Evoluzione della Resistenza Antimicrobica")
+        ax.set_xlabel("Mesi")
+        ax.set_ylabel("MIC predetta")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Scala logaritmica per MIC
+        ax.set_yscale('log')
+        
+        return fig
+
+===== visualization.py =====
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+
+def plot_resistance_heatmap(df):
+    """
+    Crea heatmap delle probabilità di resistenza
+    """
+    # Pivot della tabella
+    pivot = df.pivot_table(
+        index='bacteria', 
+        columns='antibiotic', 
+        values='resistance_probability',
+        aggfunc='mean'
+    )
+    
+    # Plot con Plotly
+    fig = px.imshow(
+        pivot, 
+        text_auto='.2f',
+        color_continuous_scale='RdYlGn_r',
+        labels=dict(x="Antibiotico", y="Batterio", color="Prob. Resistenza"),
+        title="Probabilità di Resistenza per Batterio-Antibiotico"
+    )
+    
+    fig.update_layout(width=700, height=500)
+    return fig
+
+def plot_evolution_forecast(evolution_df, antibiotic=None):
+    """
+    Crea grafico interattivo dell'evoluzione resistenza
+    """
+    if antibiotic:
+        filtered_df = evolution_df[evolution_df['antibiotic'] == antibiotic]
+    else:
+        filtered_df = evolution_df
+    
+    fig = px.line(
+        filtered_df, 
+        x='month', 
+        y='predicted_mic', 
+        color='bacteria',
+        line_dash='antibiotic',
+        markers=True,
+        hover_data=['predicted_resistant', 'resistance_probability'],
+        labels={'predicted_mic': 'MIC Prevista', 'month': 'Mesi'},
+        title=f"Previsione Evoluzione Resistenza {'per ' + antibiotic if antibiotic else ''}"
+    )
+    
+    # Aggiungi linee soglia
+    breakpoints = {
+        'Cefepime': 8,
+        'Ciprofloxacin': 1,
+        'Meropenem': 4
+    }
+    
+    for abx, bp in breakpoints.items():
+        if antibiotic and antibiotic != abx:
+            continue
+            
+        fig.add_shape(
+            type="line",
+            x0=0,
+            y0=bp,
+            x1=filtered_df['month'].max(),
+            y1=bp,
+            line=dict(color="red", width=1, dash="dash"),
+            name=f"Breakpoint {abx}"
+        )
+    
+    # Scala logaritmica per MIC
+    fig.update_layout(
+        yaxis_type="log",
+        width=800,
+        height=500,
+        xaxis_title="Mesi",
+        yaxis_title="MIC (log scale)",
+        legend_title="Batterio - Antibiotico"
+    )
+    
+    return fig
+
+def plot_feature_importance(importance_df, top_n=15):
+    """
+    Crea grafico delle feature importance
+    """
+    # Prendi top N features
+    top_features = importance_df.head(top_n)
+    
+    fig = px.bar(
+        top_features, 
+        x='importance', 
+        y='feature',
+        orientation='h',
+        title=f"Top {top_n} Features Importanti",
+        labels={'importance': 'Importanza', 'feature': 'Feature'}
+    )
+    
+    fig.update_layout(width=700, height=500)
+    return fig
+
+def create_resistance_dashboard(current_df, evolution_df, importance_df):
+    """
+    Crea dashboard completa per resistenza
+    """
+    st.header("📊 Dashboard Previsionale Resistenza")
+    
+    # Tab per diverse visualizzazioni
+    tab1, tab2, tab3 = st.tabs(["📈 Stato Attuale", "🔮 Evoluzione", "🧬 Feature Importanti"])
+    
+    with tab1:
+        st.subheader("Stato Attuale Resistenza")
+        heatmap = plot_resistance_heatmap(current_df)
+        st.plotly_chart(heatmap)
+        
+        # Tabella dettagliata
+        st.dataframe(current_df)
+    
+    with tab2:
+        st.subheader("Previsione Evoluzione Resistenza")
+        
+        # Filtro per antibiotico
+        antibiotics = sorted(evolution_df['antibiotic'].unique())
+        selected_abx = st.selectbox("Seleziona Antibiotico", ['Tutti'] + list(antibiotics))
+        
+        # Plot evoluzione
+        evo_plot = plot_evolution_forecast(
+            evolution_df, 
+            antibiotic=selected_abx if selected_abx != 'Tutti' else None
+        )
+        st.plotly_chart(evo_plot)
+        
+        # Tabella dettagliata filtrata
+        if selected_abx != 'Tutti':
+            filtered_evo = evolution_df[evolution_df['antibiotic'] == selected_abx]
+        else:
+            filtered_evo = evolution_df
+        
+        st.dataframe(filtered_evo)
+        
+        # Alert per previsioni critiche
+        critical = evolution_df[
+            (evolution_df['predicted_resistant'] == 1) & 
+            (evolution_df['month'] <= 3)
+        ]
+        
+        if not critical.empty:
+            st.warning("⚠️ **ALERT: Evoluzione Critica Rilevata**")
+            for _, row in critical.iterrows():
+                st.error(f"⚠️ {row['bacteria']} diventerà resistente a {row['antibiotic']} entro {row['month']} mesi!")
+    
+    with tab3:
+        st.subheader("Feature Importanti per la Previsione")
+        importance_plot = plot_feature_importance(importance_df)
+        st.plotly_chart(importance_plot)
+        
+        # Insights sulle features
+        st.info("ℹ️ La MIC attuale è il fattore più predittivo per l'evoluzione della resistenza")
+        
+        # Tabella completa
+        st.dataframe(importance_df)
+
+===== app.py =====
+import streamlit as st
+import pandas as pd
+import numpy as np
+import os
+import time
+import asyncio
+from amr_predictor import AMRPredictor
+from resistance_evolution import ResistanceEvolutionModel
+from visualization import create_resistance_dashboard
+from evolve_model import run_open_evolve
+
+# Configurazione pagina
+st.set_page_config(page_title="MICROFORGE AI", layout="wide")
+
+# Header app
+st.title("🧬 MICROFORGE AI™")
+st.subheader("Predictive Evolution & Resistance Engine for Pathogens")
+
+# Sidebar
+with st.sidebar:
+    st.image("https://i.imgur.com/8FfhmGZ.png", width=100)
+    st.header("🧠 MICROFORGE AI™")
+    
+    # Opzioni modello
+    st.subheader("Opzioni Modello")
+    model_type = st.selectbox(
+        "Algoritmo di base",
+        ["RandomForest", "GradientBoosting"]
+    )
+    
+    use_advanced = st.checkbox("Usa Features Avanzate", value=True)
+    
+    # Opzioni evoluzione
+    st.subheader("Opzioni Evoluzione")
+    months_ahead = st.slider("Mesi di Previsione", 1, 12, 6)
+    
+    # About info
+    st.markdown("---")
+    st.caption("© 2025 MICROFORGE AI™")
+    st.caption("Predictive Evolution & Resistance Engine")
+
+# Divisione pagina principale
+upload_col, info_col = st.columns([2,1])
+
+# Colonna upload file
+with upload_col:
+    st.header("📁 Carica Dati")
+    uploaded_file = st.file_uploader("📊 Carica un file CSV con i dati AMR", type="csv")
+    
+    # Sample dataset
+    if not uploaded_file and st.button("🔬 Usa Dataset di Esempio"):
+        df = pd.read_csv("data/amr_dataset.csv")
+        st.success("✅ Dataset di esempio caricato")
+    elif uploaded_file:
+        df = pd.read_csv(uploaded_file)
+        df.to_csv("data/uploaded.csv", index=False)  # Salva il CSV per l'uso interno
+        st.success("✅ File caricato correttamente")
+    else:
+        df = None
+    
+    # Preview dati
+    if df is not None:
+        st.write("📊 Anteprima dati:", df.head())
+        
+        # Statistiche base
+        st.subheader("📈 Statistiche Dataset")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("🦠 Batteri Unici", len(df['bacteria'].unique()))
+        
+        with col2:
+            st.metric("💊 Antibiotici Unici", len(df['antibiotic'].unique()))
+        
+        with col3:
+            st.metric("📝 Isolati Totali", df['isolate_id'].nunique() if 'isolate_id' in df.columns else len(df))
+
+# Colonna info
+with info_col:
+    st.header("ℹ️ MICROFORGE AI")
+    st.write("""
+    **MICROFORGE AI™** utilizza algoritmi di intelligenza artificiale evoluzionaria per:
+    
+    1. **Predirre resistenza antimicrobica** attuale
+    2. **Prevedere evoluzione** futura dei patogeni
+    3. **Identificare rischi** emergenti
+    
+    Carica il tuo dataset e scopri l'evoluzione della resistenza!
+    """)
+    
+    st.info("📋 **Formato richiesto CSV:**  \nIl file deve contenere: isolate_id, bacteria, antibiotic, mic, resistant")
+
+# Area analisi (se dati disponibili)
+if df is not None:
+    st.markdown("---")
+    st.header("🔬 Analisi Predittiva")
+    
+    analysis_tab, evolution_tab, advanced_tab = st.tabs([
+        "🔬 Resistenza Attuale", 
+        "🧬 Evoluzione Resistenza", 
+        "🧠 Analisi Avanzata"
+    ])
+    
+    with analysis_tab:
+        if st.button("▶️ Avvia Analisi Resistenza"):
+            with st.spinner("⏳ Elaborazione predizione resistenza..."):
+                # Crea e allena modello
+                predictor = AMRPredictor(
+                    model_type='rf' if model_type == "RandomForest" else 'gb',
+                    advanced_features=use_advanced
+                )
+                
+                # Allena modello
+                model_results = predictor.train(df)
+                
+                # Statistiche modello
+                st.subheader("📈 Performance Modello")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("AUC Training", f"{model_results['train_auc']:.4f}")
+                with col2:
+                    st.metric("AUC Testing", f"{model_results['test_auc']:.4f}")
+                
+                # Predizioni
+                predictions = predictor.predict(df)
+                st.subheader("🎯 Predizioni Resistenza")
+                st.dataframe(predictions)
+                
+                # Feature importance
+                st.subheader("🧬 Features Importanti")
+                importance = predictor.feature_importance()
+                st.bar_chart(importance.set_index('feature')['importance'])
+                
+                # Salva risultati in sessione
+                st.session_state.predictions = predictions
+                st.session_state.importance = importance
+                st.session_state.predictor = predictor
+                
+                st.success("✅ Analisi completata con successo")
+    
+    with evolution_tab:
+        if st.button("🔮 Avvia Predizione Evoluzione"):
+            with st.spinner("⏳ Elaborazione predizione evoluzione..."):
+                # Crea modello evoluzione
+                if not 'predictor' in st.session_state:
+                    # Crea e allena modello se non esistente
+                    predictor = AMRPredictor(
+                        model_type='rf' if model_type == "RandomForest" else 'gb',
+                        advanced_features=use_advanced
+                    )
+                    model_results = predictor.train(df)
+                    predictions = predictor.predict(df)
+                    st.session_state.predictions = predictions
+                    st.session_state.predictor = predictor
+                
+                # Simula dati longitudinali (in un caso reale avresti dati storici)
+                # Questo è solo per simulazione, idealmente avresti dati reali
+                current_data = df.copy()
+                # Assicura che le colonne chiave siano presenti
+                for col in ['isolate_id', 'antibiotic']:
+                    if col not in current_data.columns:
+                        current_data[col] = [f"sample_{i}" for i in range(len(current_data))] if col == 'isolate_id' else 'unknown'
+                
+                # Modello evoluzione
+                evolution_model = ResistanceEvolutionModel(
+                    time_horizon=months_ahead,
+                    model_type='rf' if model_type == "RandomForest" else 'gb'
+                )
+                
+                # Allena il modello di evoluzione (training fittizio sui dati attuali)
+                evolution_model.train(current_data)
+                
+                # Genera simulazione evoluzione
+                evolution_results = evolution_model.predict_evolution(current_data, months_ahead=months_ahead)
+                
+                # Visualizzazioni
+                st.subheader("📈 Previsione Evoluzione Resistenza")
+                fig = evolution_model.plot_resistance_evolution(evolution_results)
+                st.pyplot(fig)
+                
+                # Tabella evoluzione
+                st.subheader("📊 Dettaglio Evoluzione")
+                st.dataframe(evolution_results)
+                
+                # Alert critici
+                critical = evolution_results[
+                    (evolution_results['predicted_resistant'] == 1) & 
+                    (evolution_results['month'] <= 3)
+                ]
+                
+                if not critical.empty:
+                    st.warning("⚠️ **ALERT: Evoluzione Critica Rilevata**")
+                    for _, row in critical.iterrows():
+                        st.error(f"⚠️ {row['bacteria']} diventerà resistente a {row['antibiotic']} entro {row['month']} mesi!")
+                
+                # Salva risultati in sessione
+                st.session_state.evolution = evolution_results
+    
+    with advanced_tab:
+        if st.button("🔬 Avvia OpenEvolve AI"):
+            with st.spinner("🧠 Evoluzione del modello con AI..."):
+                try:
+                    # Esegui OpenEvolve
+                    metrics = asyncio.run(run_open_evolve())
+                    st.success("✅ Evoluzione AI completata")
+                    
+                    # Mostra metriche ottenute
+                    st.subheader("📊 Risultati OpenEvolve AI")
+                    for name, value in metrics.items():
+                        st.metric(f"🔬 {name}", round(value, 4))
+                    
+                except Exception as e:
+                    st.error(f"Errore durante l'evoluzione: {e}")
+                    
+        # Dashboard completa (se disponibili tutti i dati)
+        if ('predictions' in st.session_state and 
+            'evolution' in st.session_state and 
+            'importance' in st.session_state):
+            
+            st.subheader("📊 Dashboard Completa")
+            if st.button("📊 Genera Dashboard"):
+                create_resistance_dashboard(
+                    st.session_state.predictions,
+                    st.session_state.evolution,
+                    st.session_state.importance
+                )

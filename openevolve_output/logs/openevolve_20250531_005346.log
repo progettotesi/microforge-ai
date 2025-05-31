@@ -1,0 +1,25 @@
+2025-05-31 00:53:46,588 - openevolve.controller - INFO - Logging to openevolve_output\logs\openevolve_20250531_005346.log
+2025-05-31 00:53:46,903 - openevolve.llm.openai - INFO - Initialized OpenAI LLM with model: gpt-4
+2025-05-31 00:53:47,163 - openevolve.llm.openai - INFO - Initialized OpenAI LLM with model: gemini-2.0-flash
+2025-05-31 00:53:47,163 - openevolve.llm.ensemble - INFO - Initialized LLM ensemble with models: gpt-4 (weight: 0.80), gemini-2.0-flash (weight: 0.20)
+2025-05-31 00:53:47,163 - openevolve.prompt.sampler - INFO - Initialized prompt sampler
+2025-05-31 00:53:47,164 - openevolve.database - INFO - Initialized program database with 0 programs
+2025-05-31 00:53:47,167 - openevolve.evaluator - INFO - Successfully loaded evaluation function from evaluator.py
+2025-05-31 00:53:47,172 - openevolve.evaluator - INFO - Initialized evaluator with evaluator.py
+2025-05-31 00:53:47,173 - openevolve.controller - INFO - Initialized OpenEvolve with model.py and evaluator.py
+2025-05-31 00:53:47,173 - openevolve.controller - INFO - Adding initial program to database
+2025-05-31 00:53:47,279 - openevolve.evaluator - INFO - Evaluated program b5edd3fe-f791-4614-87fa-705cfc368f47 in 0.11s: auc=1.0000
+2025-05-31 00:53:47,279 - openevolve.controller - INFO - Starting evolution from iteration 0 for 5 iterations (total: 5)
+2025-05-31 00:53:59,615 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-05-31 00:53:59,720 - openevolve.evaluator - INFO - Evaluated program bbbc1d48-92e4-4deb-92e7-6d4bc912ca74 in 0.10s: auc=1.0000
+2025-05-31 00:54:17,882 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-05-31 00:54:17,985 - openevolve.evaluator - INFO - Evaluated program 3b443453-1822-4453-8ef7-647d50ff05aa in 0.10s: auc=1.0000
+2025-05-31 00:54:29,378 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-05-31 00:54:29,486 - openevolve.evaluator - INFO - Evaluated program 40c65109-a1ca-4b20-8928-01bb116e50d0 in 0.11s: auc=1.0000
+2025-05-31 00:54:43,295 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-05-31 00:54:43,401 - openevolve.evaluator - INFO - Evaluated program ebdcddea-30d8-4214-9510-3aabdc2ce8b8 in 0.10s: auc=1.0000
+2025-05-31 00:55:00,386 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-05-31 00:55:00,505 - openevolve.evaluator - INFO - Evaluated program 3c6a0e69-0969-4ec4-a8e2-3a4a7682797e in 0.12s: auc=1.0000
+2025-05-31 00:55:00,508 - openevolve.controller - INFO - Using tracked best program: b5edd3fe-f791-4614-87fa-705cfc368f47
+2025-05-31 00:55:00,508 - openevolve.controller - INFO - Evolution complete. Best program has metrics: auc=1.0000
+2025-05-31 00:55:00,509 - openevolve.controller - INFO - Saved best program to openevolve_output\best\best_program.py with program info to openevolve_output\best\best_program_info.json

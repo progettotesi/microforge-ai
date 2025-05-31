@@ -1,0 +1,16 @@
+isolate_id,bacteria,antibiotic,mic,resistant,time_point
+1,P.aeruginosa,Cefepime,16.0,1,1
+1,P.aeruginosa,Cefepime,18.0,1,2
+1,P.aeruginosa,Cefepime,20.0,1,3
+2,P.aeruginosa,Ciprofloxacin,0.5,0,1
+2,P.aeruginosa,Ciprofloxacin,1.0,0,2
+2,P.aeruginosa,Ciprofloxacin,2.0,1,3
+3,E.coli,Ampicillin,2.0,0,1
+3,E.coli,Ampicillin,4.0,1,2
+3,E.coli,Ampicillin,8.0,1,3
+4,K.pneumoniae,Meropenem,0.25,0,1
+4,K.pneumoniae,Meropenem,0.5,0,2
+4,K.pneumoniae,Meropenem,1.0,1,3
+5,P.aeruginosa,Meropenem,32.0,1,1
+5,P.aeruginosa,Meropenem,28.0,1,2
+5,P.aeruginosa,Meropenem,24.0,1,3

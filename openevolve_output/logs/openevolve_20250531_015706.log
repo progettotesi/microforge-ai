@@ -1,0 +1,12 @@
+2025-05-31 01:57:06,539 - openevolve.controller - INFO - Logging to openevolve_output\logs\openevolve_20250531_015706.log
+2025-05-31 01:57:06,868 - openevolve.llm.openai - INFO - Initialized OpenAI LLM with model: gpt-4
+2025-05-31 01:57:07,154 - openevolve.llm.openai - INFO - Initialized OpenAI LLM with model: gemini-2.0-flash
+2025-05-31 01:57:07,154 - openevolve.llm.ensemble - INFO - Initialized LLM ensemble with models: gpt-4 (weight: 0.80), gemini-2.0-flash (weight: 0.20)
+2025-05-31 01:57:07,154 - openevolve.prompt.sampler - INFO - Initialized prompt sampler
+2025-05-31 01:57:07,154 - openevolve.database - INFO - Initialized program database with 0 programs
+2025-05-31 01:57:07,156 - openevolve.evaluator - INFO - Successfully loaded evaluation function from evaluator.py
+2025-05-31 01:57:07,162 - openevolve.evaluator - INFO - Initialized evaluator with evaluator.py
+2025-05-31 01:57:07,162 - openevolve.controller - INFO - Initialized OpenEvolve with model.py and evaluator.py
+2025-05-31 01:57:07,162 - openevolve.controller - INFO - Adding initial program to database
+2025-05-31 01:57:07,284 - openevolve.evaluator - INFO - Evaluated program 5a8d1568-76eb-41c3-9203-51fd108f8dd8 in 0.12s: auc=1.0000
+2025-05-31 01:57:07,285 - openevolve.controller - INFO - Starting evolution from iteration 0 for 5 iterations (total: 5)
