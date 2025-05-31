@@ -18,7 +18,7 @@ st.subheader("Predictive Evolution & Resistance Engine for Pathogens")
 
 # Sidebar
 with st.sidebar:
-    st.image("https://i.imgur.com/8FfhmGZ.png", width=100)
+    st.image("logo/logo.png", width=100)
     st.header("🧠 MICROFORGE AI™")
     
     # Opzioni modello
